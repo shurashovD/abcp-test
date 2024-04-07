@@ -5,7 +5,7 @@
 // Укажите правильные типы.
 // По возможности пришлите Ваш вариант в https://codesandbox.io
 
-import React, { MouseEventHandler, useRef, useState } from "react";
+import React, { MouseEventHandler, memo, useCallback, useRef, useState } from "react";
 
 const THROTTLE_MS = 600
 const URL = "https://jsonplaceholder.typicode.com/users";
@@ -39,6 +39,10 @@ function Button({ onClick }: IButtonProps): JSX.Element {
   );
 }
 
+// выполнение требования использовать memo, благодаря memo не происходит перерендера Button;
+// при этом props onClick, объявленный ниже в useThrottle пришлось обернуть в useCallback и все его фнукции-зависимости тоже;
+const MemoButton = memo(Button)
+
 interface IUserInfoProps {
   user: User;
 }
@@ -71,7 +75,7 @@ function UserInfo({ user }: IUserInfoProps): JSX.Element {
 const useThrottle = (fn: MouseEventHandler, ms: number = 600) => {
   const timerId = useRef<ReturnType<typeof setTimeout> | null>(null)  // таймер пропуска вызова;
 
-  const withThrottle: MouseEventHandler = (args) => {
+  const withThrottle: MouseEventHandler = useCallback((args) => {
     if (timerId.current) {  // если время пропуска не истекло;
       return                // ничего не делаем;
     }
@@ -82,7 +86,7 @@ const useThrottle = (fn: MouseEventHandler, ms: number = 600) => {
     }, ms)
 
     fn(args)    // вызываем обработчик;
-  }
+  }, [fn, ms])
 
   return withThrottle
 }
@@ -94,21 +98,10 @@ function App(): JSX.Element {
   const cashe = useRef<Map<number, User>>(new Map())            // кэш пользователей - набор c ключом id;
 
   // получение id вынесено в отдельную функцию;
-  const generateRandomId = () => Math.floor(Math.random() * (10 - 1)) + 1
-
-  // функция кэширования данных, кэш живёт до перезагрузки страницы;
-  const cashedReceiveRandomUser = async (id: number) => {
-    if (cashe.current.has(id)) {        // если в кэше есть нужные данные;
-      return cashe.current.get(id)!            // вернём их;
-    }
-
-    const _user = await receiveRandomUser(id) // в противном случае запросим с сервера;
-    cashe.current.set(id, _user)              // и сохраним в кэш;
-    return _user                              // вернём полученные данные;
-  }
+  const generateRandomId = useCallback(() => Math.floor(Math.random() * (10 - 1)) + 1, [])
 
   // возвращает пользователя с сервера, устанавливает флаг ошибки, остальная логика вынесена в отдельные функции;
-  const receiveRandomUser = async (id: number) => {
+  const receiveRandomUser = useCallback(async (id: number) => {
     setHasFetchError(false)                           // сброс флага ошибки перед началом заппроса;
     
     try {
@@ -119,10 +112,21 @@ function App(): JSX.Element {
       setHasFetchError(true)
       throw e
     }
-  };
+  }, [])
+
+  // функция кэширования данных, кэш живёт до перезагрузки страницы;
+  const cashedReceiveRandomUser = useCallback(async (id: number) => {
+    if (cashe.current.has(id)) {        // если в кэше есть нужные данные;
+      return cashe.current.get(id)!            // вернём их;
+    }
+
+    const _user = await receiveRandomUser(id) // в противном случае запросим с сервера;
+    cashe.current.set(id, _user)              // и сохраним в кэш;
+    return _user                              // вернём полученные данные;
+  }, [receiveRandomUser])
 
   // обработчик клика;
-  const handleButtonClick = async (
+  const handleButtonClick = useCallback(async (
     event: React.MouseEvent<HTMLButtonElement, MouseEvent>
   ) => {
     event.stopPropagation();
@@ -137,7 +141,7 @@ function App(): JSX.Element {
       console.error(e);
       setUser(null)     // сбрасываем пользователя;
     }
-  }
+  }, [cashedReceiveRandomUser, generateRandomId])
 
   // обработчки клика с пропуском повторов;
   const throttledHandleButtonClick = useThrottle(handleButtonClick, THROTTLE_MS)
@@ -145,7 +149,7 @@ function App(): JSX.Element {
   return (
     <div>
       <header>Get a random user</header>
-      <Button onClick={throttledHandleButtonClick} />
+      <MemoButton onClick={throttledHandleButtonClick} />
       {!hasFetchError && user && <UserInfo user={user} /> }
       {hasFetchError && <div>Ошибка получения пользователя...</div> }
       {!hasFetchError && !user && <div>Нет пользователя</div> }
